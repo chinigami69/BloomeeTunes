@@ -5,8 +5,10 @@ import 'package:Bloomee/services/meta_resolver/cross_plugin_resolver.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:Bloomee/core/di/service_locator.dart';
+import 'package:Bloomee/core/models/playlist_sync_source.dart';
 import 'package:Bloomee/plugins/blocs/import/content_import_state.dart';
 import 'package:Bloomee/services/db/dao/playlist_dao.dart';
+import 'package:Bloomee/services/db/dao/playlist_sync_dao.dart';
 import 'package:Bloomee/services/db/dao/track_dao.dart';
 import 'package:Bloomee/services/db/db_provider.dart';
 import 'package:Bloomee/services/plugin/plugin_service.dart';
@@ -22,6 +24,9 @@ class ContentImportCubit extends Cubit<ContentImportState> {
   final PluginService _pluginService;
   final CrossPluginResolver _resolver;
   final PlaylistDAO _playlistDao;
+  final PlaylistSyncDAO? _syncDaoOverride;
+  late final PlaylistSyncDAO _syncDao =
+      _syncDaoOverride ?? PlaylistSyncDAO(DBProvider.db);
 
   bool _cancelRequested = false;
   int _operationId = 0;
@@ -33,12 +38,14 @@ class ContentImportCubit extends Cubit<ContentImportState> {
     PluginService? pluginService,
     CrossPluginResolver? resolver,
     PlaylistDAO? playlistDao,
+    PlaylistSyncDAO? playlistSyncDao,
   })  : _pluginService = pluginService ?? ServiceLocator.pluginService,
         _resolver = resolver ??
             CrossPluginResolver(
               pluginService: pluginService ?? ServiceLocator.pluginService,
             ),
         _playlistDao = playlistDao ?? _defaultPlaylistDao(),
+        _syncDaoOverride = playlistSyncDao,
         super(const ContentImportState());
 
   static PlaylistDAO _defaultPlaylistDao() {
@@ -356,6 +363,8 @@ class ContentImportCubit extends Cubit<ContentImportState> {
       log('Saved $savedCount tracks to "$playlistName".',
           name: 'ContentImportCubit');
 
+      await _rememberSource(playlistId);
+
       emit(state.copyWith(
         phase: ImportPhase.done,
         resolvedCount: savedCount,
@@ -366,6 +375,44 @@ class ContentImportCubit extends Cubit<ContentImportState> {
         phase: ImportPhase.error,
         error: 'Failed to save playlist: $e',
       ));
+    }
+  }
+
+  /// Records the link this playlist came from so it can be synced later.
+  /// Never fails the import.
+  Future<void> _rememberSource(int playlistId) async {
+    final pluginId = state.pluginId;
+    final url = state.url;
+    if (pluginId == null || url == null || url.trim().isEmpty) return;
+    try {
+      final previous = await _syncDao.getForPlaylist(playlistId);
+      final items = <String, String?>{
+        // Importing a different link into the same playlist starts over.
+        if (previous != null && previous.url == url) ...previous.items,
+      };
+      for (final entry in state.tracks) {
+        final t = entry.sourceTrack;
+        final key = playlistSyncSourceKey(
+          sourceId: t.sourceId,
+          url: t.url,
+          title: t.title,
+          artists: t.artists,
+        );
+        final id = entry.effectiveTrack?.id;
+        items[key] = id ?? (entry.isSkipped ? '' : null);
+      }
+      await _syncDao.put(
+        playlistId,
+        PlaylistSyncSource(
+          pluginId: pluginId,
+          url: url,
+          playlistName: '',
+          items: items,
+          lastSyncedAt: DateTime.now(),
+        ),
+      );
+    } catch (e) {
+      log('Could not record import source: $e', name: 'ContentImportCubit');
     }
   }
 

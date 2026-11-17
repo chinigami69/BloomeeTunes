@@ -738,5 +738,14 @@
   "eqPresetTrebleBoost": "Treble boost",
   "eqPresetTrebleReducer": "Treble reduction",
   "eqPresetVocalBooster": "Vocal boost",
-  "eqPresetCustom": "Custom"
+  "eqPresetCustom": "Custom",
+  "playlistSyncWithSource": "Sync with source",
+  "playlistSyncing": "Syncing {name}…",
+  "@playlistSyncing": { "placeholders": { "name": { "type": "String" } } },
+  "playlistSyncDone": "{name} synced: {added} added, {removed} removed",
+  "@playlistSyncDone": { "placeholders": { "name": { "type": "String" }, "added": { "type": "int" }, "removed": { "type": "int" } } },
+  "playlistSyncUpToDate": "{name} is already up to date",
+  "@playlistSyncUpToDate": { "placeholders": { "name": { "type": "String" } } },
+  "playlistSyncNotFound": "{count} songs could not be found",
+  "@playlistSyncNotFound": { "placeholders": { "count": { "type": "int" } } }
 }

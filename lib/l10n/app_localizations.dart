@@ -3757,6 +3757,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Custom'**
   String get eqPresetCustom;
+
+  /// No description provided for @playlistSyncWithSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync with source'**
+  String get playlistSyncWithSource;
+
+  /// No description provided for @playlistSyncing.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing {name}…'**
+  String playlistSyncing(String name);
+
+  /// No description provided for @playlistSyncDone.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} synced: {added} added, {removed} removed'**
+  String playlistSyncDone(String name, int added, int removed);
+
+  /// No description provided for @playlistSyncUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is already up to date'**
+  String playlistSyncUpToDate(String name);
+
+  /// No description provided for @playlistSyncNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} songs could not be found'**
+  String playlistSyncNotFound(int count);
 }
 
 class _AppLocalizationsDelegate

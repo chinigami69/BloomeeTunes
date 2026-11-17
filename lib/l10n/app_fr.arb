@@ -1050,5 +1050,10 @@
   "eqPresetTrebleBoost": "Renforcement des aigus",
   "eqPresetTrebleReducer": "Réduction des aigus",
   "eqPresetVocalBooster": "Renforcement des voix",
-  "eqPresetCustom": "Personnalisé"
+  "eqPresetCustom": "Personnalisé",
+  "playlistSyncWithSource": "Synchroniser avec la source",
+  "playlistSyncing": "Synchronisation de {name}…",
+  "playlistSyncDone": "{name} synchronisée : {added} ajoutées, {removed} retirées",
+  "playlistSyncUpToDate": "{name} est déjà à jour",
+  "playlistSyncNotFound": "{count} titres introuvables"
 }

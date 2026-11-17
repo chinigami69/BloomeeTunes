@@ -2093,4 +2093,27 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get eqPresetCustom => 'Benutzerdefiniert';
+
+  @override
+  String get playlistSyncWithSource => 'Sync with source';
+
+  @override
+  String playlistSyncing(String name) {
+    return 'Syncing $name…';
+  }
+
+  @override
+  String playlistSyncDone(String name, int added, int removed) {
+    return '$name synced: $added added, $removed removed';
+  }
+
+  @override
+  String playlistSyncUpToDate(String name) {
+    return '$name is already up to date';
+  }
+
+  @override
+  String playlistSyncNotFound(int count) {
+    return '$count songs could not be found';
+  }
 }

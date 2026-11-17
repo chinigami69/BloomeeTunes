@@ -52,6 +52,7 @@ import 'package:Bloomee/l10n/language_options.dart';
 import 'package:Bloomee/blocs/add_to_playlist/cubit/add_to_playlist_cubit.dart';
 import 'package:Bloomee/blocs/library/cubit/library_items_cubit.dart';
 import 'package:Bloomee/plugins/blocs/import/content_import_cubit.dart';
+import 'package:Bloomee/blocs/playlist_sync/playlist_sync_cubit.dart';
 import 'package:Bloomee/routes/app_router.dart';
 import 'package:Bloomee/blocs/current_playlist/cubit/current_playlist_cubit.dart';
 import 'package:media_kit/media_kit.dart';
@@ -370,6 +371,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ),
         BlocProvider(
           create: (context) => ContentImportCubit(),
+          lazy: true,
+        ),
+        BlocProvider(
+          create: (context) => PlaylistSyncCubit(),
           lazy: true,
         ),
         BlocProvider(

@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:icons_plus/icons_plus.dart';
 
 import 'package:Bloomee/blocs/library/cubit/library_items_cubit.dart';
+import 'package:Bloomee/blocs/playlist_sync/playlist_sync_cubit.dart';
 import 'package:Bloomee/blocs/media_player/bloomee_player_cubit.dart';
 import 'package:Bloomee/core/models/media_playlist_model.dart';
 import 'package:Bloomee/blocs/current_playlist/cubit/current_playlist_cubit.dart';
@@ -178,6 +179,12 @@ class _PlaylistOptionsSheet extends StatelessWidget {
                                   ),
                                 ],
                               ),
+                            if (!isInternal && playlistId != null)
+                              _SyncWithSourceGroup(
+                                playlistId: playlistId!,
+                                playlistName: title,
+                                parentContext: ctx,
+                              ),
                             _OptionGroup(
                               children: [
                                 if (ctx.read<BackupCubit>().canShareFiles)
@@ -247,6 +254,75 @@ class _PlaylistOptionsSheet extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Sync an imported playlist with its source link ──────────────────────────
+
+/// Shown only for playlists imported from a link (e.g. a Spotify playlist).
+class _SyncWithSourceGroup extends StatefulWidget {
+  final int playlistId;
+  final String playlistName;
+  final BuildContext parentContext;
+
+  const _SyncWithSourceGroup({
+    required this.playlistId,
+    required this.playlistName,
+    required this.parentContext,
+  });
+
+  @override
+  State<_SyncWithSourceGroup> createState() => _SyncWithSourceGroupState();
+}
+
+class _SyncWithSourceGroupState extends State<_SyncWithSourceGroup> {
+  late final Future<bool> _canSync =
+      widget.parentContext.read<PlaylistSyncCubit>().canSync(widget.playlistId);
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _canSync,
+      builder: (context, snapshot) {
+        if (snapshot.data != true) return const SizedBox.shrink();
+        final l10n = AppLocalizations.of(context)!;
+        return _OptionGroup(
+          children: [
+            _BottomSheetTile(
+              icon: MingCute.refresh_2_line,
+              iconColor: Default_Theme.accentColor2,
+              title: l10n.playlistSyncWithSource,
+              onTap: () => _sync(l10n),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _sync(AppLocalizations l10n) async {
+    final cubit = widget.parentContext.read<PlaylistSyncCubit>();
+    final name = widget.playlistName;
+    SnackbarService.showMessage(
+      l10n.playlistSyncing(name),
+      loading: true,
+      duration: const Duration(minutes: 5),
+    );
+    final result = await cubit.sync(widget.playlistId);
+    if (!result.ok) {
+      SnackbarService.showMessage(result.error!,
+          duration: const Duration(seconds: 5));
+      return;
+    }
+    final summary = result.changed
+        ? l10n.playlistSyncDone(name, result.added, result.removed)
+        : l10n.playlistSyncUpToDate(name);
+    SnackbarService.showMessage(
+      result.notFound > 0
+          ? '$summary · ${l10n.playlistSyncNotFound(result.notFound)}'
+          : summary,
+      duration: const Duration(seconds: 4),
     );
   }
 }
