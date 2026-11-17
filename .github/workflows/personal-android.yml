@@ -1,0 +1,136 @@
+name: Personal Android build (Bloomee Sync)
+
+# Builds this fork as "Bloomee Sync" (package ls.bloomee.musicplayer.sync),
+# so it installs next to the official Bloomee instead of replacing it.
+# Needs the KEY_STORE, KEY_ALIAS, KEY_PASSWORD and STORE_PASSWORD secrets.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.47.7'
+
+jobs:
+  android:
+    name: Build Bloomee Sync APKs
+    runs-on: ubuntu-24.04
+    env:
+      GRADLE_OPTS: -Dorg.gradle.caching=true
+    steps:
+      - name: Check signing secrets
+        env:
+          KEY_STORE: ${{ secrets.KEY_STORE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          missing=""
+          for n in KEY_STORE KEY_ALIAS KEY_PASSWORD STORE_PASSWORD; do
+            [ -n "${!n}" ] || missing="$missing $n"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Add these repository secrets first (Settings > Secrets and variables > Actions):$missing"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Select Build JDK
+        run: flutter config --jdk-dir="$JAVA_HOME"
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> ../build/rust_lib_Bloomee/build
+          key: personal-android-flutter-${{ env.FLUTTER_VERSION }}
+          cache-workspace-crates: true
+
+      - name: Install Dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check the sync feature compiles
+        run: >
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+          lib/core/models/playlist_sync_source.dart
+          lib/services/db/dao/playlist_sync_dao.dart
+          lib/blocs/playlist_sync
+          lib/plugins/blocs/import/content_import_cubit.dart
+          lib/screens/screen/library_views/more_opts_sheet.dart
+          lib/main.dart
+
+      - name: Run sync tests
+        run: flutter test --no-pub test/playlist_sync_test.dart
+
+      - name: Rename app to install next to the official Bloomee
+        run: |
+          sed -i 's/applicationId = "ls.bloomee.musicplayer"/applicationId = "ls.bloomee.musicplayer.sync"/' android/app/build.gradle.kts
+          sed -i 's/android:label="Bloomee"/android:label="Bloomee Sync"/' android/app/src/main/AndroidManifest.xml
+          grep -q 'applicationId = "ls.bloomee.musicplayer.sync"' android/app/build.gradle.kts
+          grep -q 'android:label="Bloomee Sync"' android/app/src/main/AndroidManifest.xml
+
+      - name: Configure Signing
+        env:
+          KEY_STORE: ${{ secrets.KEY_STORE }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          def prop(name):
+              v = os.environ[name].encode('utf-16-be')
+              return ''.join('\\u' + v[i:i + 2].hex() for i in range(0, len(v), 2))
+          Path('android/bloomee.jks').write_bytes(
+              base64.b64decode(''.join(os.environ['KEY_STORE'].split()), validate=True))
+          Path('android/key.properties').write_text(
+              f"keyPassword={prop('KEY_PASSWORD')}\nstorePassword={prop('STORE_PASSWORD')}\nkeyAlias={prop('KEY_ALIAS')}\n",
+              encoding='ascii')
+          PY
+
+      - name: Build APKs
+        run: >
+          flutter build apk --release --split-per-abi
+          --target-platform android-arm,android-arm64
+          --build-number "$GITHUB_RUN_NUMBER"
+
+      - name: Stage APKs
+        run: |
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          mkdir -p dist
+          for ABI in arm64-v8a armeabi-v7a; do
+            APK="build/app/outputs/flutter-apk/app-$ABI-release.apk"
+            "$BUILD_TOOLS/apksigner" verify "$APK"
+            cp "$APK" "dist/bloomee_sync_${ABI}_build${GITHUB_RUN_NUMBER}.apk"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bloomee-Sync-Android
+          path: dist/*.apk
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Remove Signing Files
+        if: always()
+        run: rm -f android/key.properties android/bloomee.jks
