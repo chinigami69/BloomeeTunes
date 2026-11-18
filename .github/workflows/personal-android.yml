@@ -73,6 +73,7 @@ jobs:
           lib/core/models/playlist_sync_source.dart
           lib/services/db/dao/playlist_sync_dao.dart
           lib/blocs/playlist_sync
+          lib/services/meta_resolver
           lib/plugins/blocs/import/content_import_cubit.dart
           lib/screens/screen/library_views/more_opts_sheet.dart
           lib/main.dart
