@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer';
 
 import 'package:Bloomee/services/meta_resolver/cross_plugin_resolver.dart';
+import 'package:Bloomee/services/meta_resolver/paced_track_resolver.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:Bloomee/core/di/service_locator.dart';
@@ -16,7 +17,6 @@ import 'package:Bloomee/src/rust/api/plugin/commands.dart';
 import 'package:Bloomee/src/rust/api/plugin/types.dart';
 import 'package:Bloomee/src/rust/api/plugin/models.dart';
 
-const int _kResolutionConcurrency = 5;
 const double _kMinConfidence = 0.45;
 const int _kMaxCandidatesPerTrack = 5;
 
@@ -192,22 +192,54 @@ class ContentImportCubit extends Cubit<ContentImportState> {
     }
 
     final tracks = List<ImportTrackEntry>.from(state.tracks);
-    final semaphore = Semaphore(_kResolutionConcurrency);
-    final futures = <Future<void>>[];
 
-    for (var i = 0; i < tracks.length; i++) {
-      final index = i;
-      futures.add(
-        semaphore.run(() => _resolveOneEntry(
-              operationId: operationId,
-              tracks: tracks,
-              index: index,
-              pluginIds: resolverPluginIds,
-            )),
-      );
+    void emitProgress() {
+      if (!_isCurrent(operationId) || _cancelRequested) return;
+      final counts = _recount(tracks);
+      emit(state.copyWith(
+        tracks: List.unmodifiable(tracks),
+        resolvedCount: counts.resolved,
+        failedCount: counts.failed,
+      ));
     }
 
-    await Future.wait(futures);
+    // Paced, with retries for lookups the source did not answer, so a large
+    // import does not get throttled into missing most of its songs.
+    await PacedTrackResolver(resolver: _resolver).resolveAll(
+      count: tracks.length,
+      pluginIds: resolverPluginIds,
+      minConfidence: _kMinConfidence,
+      limit: _kMaxCandidatesPerTrack,
+      isCancelled: () => !_isCurrent(operationId) || _cancelRequested,
+      targetOf: (index) {
+        final source = tracks[index].sourceTrack;
+        return TrackMatchTarget.fromImport(
+          title: source.title,
+          artists: source.artists,
+          durationMs: source.durationMs?.toInt(),
+        );
+      },
+      onStart: (index) {
+        tracks[index] =
+            tracks[index].copyWith(status: TrackResolutionStatus.resolving);
+        emitProgress();
+      },
+      onResult: (index, candidates) {
+        final entry = tracks[index];
+        tracks[index] = candidates.isNotEmpty
+            ? entry.copyWith(
+                status: TrackResolutionStatus.resolved,
+                resolvedTrack: candidates.first.track,
+                candidates:
+                    candidates.map((c) => c.track).toList(growable: false),
+              )
+            : entry.copyWith(
+                status: TrackResolutionStatus.failed,
+                candidates: const [],
+              );
+        emitProgress();
+      },
+    );
 
     if (_isCurrent(operationId) && !_cancelRequested) {
       final counts = _recount(tracks);
@@ -221,78 +253,6 @@ class ContentImportCubit extends Cubit<ContentImportState> {
         resolvedCount: counts.resolved,
         failedCount: counts.failed,
         phase: ImportPhase.review,
-      ));
-    }
-  }
-
-  Future<void> _resolveOneEntry({
-    required int operationId,
-    required List<ImportTrackEntry> tracks,
-    required int index,
-    required List<String> pluginIds,
-  }) async {
-    if (!_isCurrent(operationId) || _cancelRequested) return;
-
-    final entry = tracks[index];
-
-    // Mark as resolving.
-    tracks[index] = entry.copyWith(status: TrackResolutionStatus.resolving);
-    if (_isCurrent(operationId)) {
-      emit(state.copyWith(tracks: List.unmodifiable(tracks)));
-    }
-
-    try {
-      final target = TrackMatchTarget.fromImport(
-        title: entry.sourceTrack.title,
-        artists: entry.sourceTrack.artists,
-        durationMs: entry.sourceTrack.durationMs?.toInt(),
-      );
-
-      // Use the shared resolver — parallel across plugins, scored, with
-      // early-exit on high confidence.
-      final candidates = await _resolver.resolveTrack(
-        target: target,
-        pluginIds: pluginIds,
-        sequential: false,
-        minConfidence: _kMinConfidence,
-        earlyAcceptThreshold: 0.93,
-        limit: _kMaxCandidatesPerTrack,
-      );
-
-      if (!_isCurrent(operationId) || _cancelRequested) return;
-
-      if (candidates.isNotEmpty) {
-        tracks[index] = entry.copyWith(
-          status: TrackResolutionStatus.resolved,
-          resolvedTrack: candidates.first.track,
-          candidates: candidates.map((c) => c.track).toList(growable: false),
-        );
-      } else {
-        tracks[index] = entry.copyWith(
-          status: TrackResolutionStatus.failed,
-          candidates: const [],
-        );
-      }
-    } catch (e) {
-      log(
-        'Failed to resolve "${entry.sourceTrack.title}": $e',
-        name: 'ContentImportCubit',
-      );
-      if (_isCurrent(operationId) && !_cancelRequested) {
-        tracks[index] = entry.copyWith(
-          status: TrackResolutionStatus.failed,
-          candidates: const [],
-        );
-      }
-    }
-
-    // Emit progress.
-    if (_isCurrent(operationId) && !_cancelRequested) {
-      final counts = _recount(tracks);
-      emit(state.copyWith(
-        tracks: List.unmodifiable(tracks),
-        resolvedCount: counts.resolved,
-        failedCount: counts.failed,
       ));
     }
   }

@@ -111,6 +111,20 @@ class TrackMatchTarget {
 }
 
 /// A candidate track returned by resolution, annotated with confidence.
+/// Counters filled in by [CrossPluginResolver.resolveTrack] so a caller can
+/// tell "the source has no such song" from "the source did not answer".
+class ResolveStats {
+  /// Searches that threw or timed out.
+  int errors = 0;
+
+  /// Searches that answered with at least one item.
+  int answered = 0;
+
+  /// True when the miss looks like a source problem (errors, throttling or
+  /// empty answers for every query) and is worth trying again later.
+  bool get looksUnanswered => errors > 0 || answered == 0;
+}
+
 class ScoredTrackCandidate {
   final Track track;
   final String pluginId;
@@ -200,6 +214,7 @@ class CrossPluginResolver {
     Set<String> excludeTrackIds = const {},
     ContentSearchFilter searchFilter = ContentSearchFilter.track,
     List<String>? queries,
+    ResolveStats? stats,
   }) async {
     if (pluginIds.isEmpty) return const [];
 
@@ -219,6 +234,7 @@ class CrossPluginResolver {
           minConfidence: minConfidence,
           earlyAcceptThreshold: earlyAcceptThreshold,
           excludeTrackIds: excludeTrackIds,
+          stats: stats,
         );
         _mergeCandidates(candidates, batch);
 
@@ -242,6 +258,7 @@ class CrossPluginResolver {
             minConfidence: minConfidence,
             earlyAcceptThreshold: earlyAcceptThreshold,
             excludeTrackIds: excludeTrackIds,
+            stats: stats,
           ).catchError((Object e) {
             log('Plugin $pluginId failed: $e', name: 'CrossPluginResolver');
             return <ScoredTrackCandidate>[];
@@ -722,6 +739,7 @@ class CrossPluginResolver {
     required double minConfidence,
     required double earlyAcceptThreshold,
     required Set<String> excludeTrackIds,
+    ResolveStats? stats,
   }) async {
     final candidates = <String, ScoredTrackCandidate>{};
     double bestThisPlugin = 0;
@@ -747,6 +765,7 @@ class CrossPluginResolver {
           case PluginResponse_Search(:final field0):
             final items =
                 field0.items.take(maxResultsPerQuery).toList(growable: false);
+            if (items.isNotEmpty) stats?.answered++;
             for (final item in items) {
               final track = switch (item) {
                 MediaItem_Track(:final field0) => field0,
@@ -771,9 +790,11 @@ class CrossPluginResolver {
           default:
         }
       } on TimeoutException {
+        stats?.errors++;
         log('Timeout: plugin=$pluginId query="$query"',
             name: 'CrossPluginResolver');
       } catch (e) {
+        stats?.errors++;
         log('Search failed: plugin=$pluginId query="$query" error=$e',
             name: 'CrossPluginResolver');
       }

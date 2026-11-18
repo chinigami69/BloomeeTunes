@@ -11,6 +11,7 @@ import 'package:Bloomee/services/db/dao/playlist_sync_dao.dart';
 import 'package:Bloomee/services/db/dao/track_dao.dart';
 import 'package:Bloomee/services/db/db_provider.dart';
 import 'package:Bloomee/services/meta_resolver/cross_plugin_resolver.dart';
+import 'package:Bloomee/services/meta_resolver/paced_track_resolver.dart';
 import 'package:Bloomee/services/plugin/plugin_service.dart';
 import 'package:Bloomee/src/rust/api/plugin/commands.dart';
 import 'package:Bloomee/src/rust/api/plugin/models.dart';
@@ -18,7 +19,6 @@ import 'package:Bloomee/src/rust/api/plugin/types.dart';
 
 export 'package:Bloomee/blocs/playlist_sync/playlist_sync_state.dart';
 
-const int _kResolutionConcurrency = 5;
 const double _kMinConfidence = 0.45;
 
 /// Re-reads the link an imported playlist came from and brings the playlist
@@ -137,13 +137,24 @@ class PlaylistSyncCubit extends Cubit<PlaylistSyncState> {
             'No music source plugin is enabled to find the new songs.');
       }
       final results = List<Track?>.filled(plan.toResolve.length, null);
-      final semaphore = Semaphore(_kResolutionConcurrency);
-      await Future.wait([
-        for (var i = 0; i < plan.toResolve.length; i++)
-          semaphore.run(() async {
-            results[i] = await _resolve(byKey[plan.toResolve[i]]!, resolverIds);
-          }),
-      ]);
+      await PacedTrackResolver(resolver: _resolver).resolveAll(
+        count: plan.toResolve.length,
+        pluginIds: resolverIds,
+        minConfidence: _kMinConfidence,
+        limit: 1,
+        isCancelled: () => isClosed,
+        targetOf: (i) {
+          final item = byKey[plan.toResolve[i]]!;
+          return TrackMatchTarget.fromImport(
+            title: item.title,
+            artists: item.artists,
+            durationMs: item.durationMs?.toInt(),
+          );
+        },
+        onResult: (i, candidates) {
+          results[i] = candidates.isEmpty ? null : candidates.first.track;
+        },
+      );
       for (var i = 0; i < plan.toResolve.length; i++) {
         final track = results[i];
         items[plan.toResolve[i]] = track?.id;
@@ -174,27 +185,6 @@ class PlaylistSyncCubit extends Cubit<PlaylistSyncState> {
       removed: plan.mediaIdsToRemove.length,
       notFound: notFound,
     );
-  }
-
-  Future<Track?> _resolve(ImportTrackItem item, List<String> pluginIds) async {
-    try {
-      final candidates = await _resolver.resolveTrack(
-        target: TrackMatchTarget.fromImport(
-          title: item.title,
-          artists: item.artists,
-          durationMs: item.durationMs?.toInt(),
-        ),
-        pluginIds: pluginIds,
-        sequential: false,
-        minConfidence: _kMinConfidence,
-        earlyAcceptThreshold: 0.93,
-        limit: 1,
-      );
-      return candidates.isEmpty ? null : candidates.first.track;
-    } catch (e) {
-      log('Could not resolve "${item.title}": $e', name: 'PlaylistSyncCubit');
-      return null;
-    }
   }
 
   Future<List<String>> _contentResolverPluginIds() async {
